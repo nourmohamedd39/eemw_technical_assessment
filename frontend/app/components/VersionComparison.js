@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { compareDocumentVersions } from "../../lib/api";
-
-const renderLines = (lines, className) => <pre className={`comparison-lines ${className}`}>{lines.join("\n")}</pre>;
+import ComparisonControls from "./ComparisonControls";
+import SpreadsheetDiffViewer from "./SpreadsheetDiffViewer";
+import TextDiffViewer from "./TextDiffViewer";
 
 export default function VersionComparison({ documentId, versions, demoUserId }) {
   const [fromVersion, setFromVersion] = useState("");
@@ -11,11 +12,14 @@ export default function VersionComparison({ documentId, versions, demoUserId }) 
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState("changes");
 
   useEffect(() => {
     if (versions.length >= 2) {
       setFromVersion(String(versions[1].version_number));
       setToVersion(String(versions[0].version_number));
+      setComparison(null);
+      setError("");
     }
   }, [versions]);
 
@@ -39,18 +43,23 @@ export default function VersionComparison({ documentId, versions, demoUserId }) 
   };
 
   if (versions.length < 2) {
-    return <p className="comparison-note">Add another TXT version to compare document changes.</p>;
+    return null;
   }
 
   return (
     <div className="comparison-panel">
-      <form className="comparison-form" onSubmit={compare}>
-        <label><span>From</span><select value={fromVersion} onChange={(event) => setFromVersion(event.target.value)}>{versions.map((version) => <option key={version.id} value={version.version_number}>Version {version.version_number}</option>)}</select></label>
-        <label><span>To</span><select value={toVersion} onChange={(event) => setToVersion(event.target.value)}>{versions.map((version) => <option key={version.id} value={version.version_number}>Version {version.version_number}</option>)}</select></label>
-        <button className="secondary-button compare-button" type="submit" disabled={loading}>{loading ? "Comparing..." : "Compare versions"}</button>
-      </form>
+      <ComparisonControls versions={versions} fromVersion={fromVersion} toVersion={toVersion} onFromChange={(value) => { setFromVersion(value); setComparison(null); }} onToChange={(value) => { setToVersion(value); setComparison(null); }} onCompare={compare} loading={loading} />
       {error && <p className="alert error" role="alert">{error}</p>}
-      {comparison && <div className="comparison-result" aria-live="polite"><p className="comparison-summary">Comparing version {comparison.fromVersion} with version {comparison.toVersion}</p>{comparison.changes.map((change, index) => <section className={`comparison-block ${change.type}`} key={`${change.type}-${index}`}><strong>{change.type === "unchanged" ? "Unchanged" : change.type === "added" ? "Added" : change.type === "removed" ? "Removed" : "Changed"}</strong>{change.type === "changed" ? <><div className="comparison-sub-block"><span className="comparison-sub-label">Removed</span>{renderLines(change.removed, "removed")}</div><div className="comparison-sub-block"><span className="comparison-sub-label">Added</span>{renderLines(change.added, "added")}</div></> : renderLines(change.lines, change.type)}</section>)}{comparison.changes.length === 0 && <p className="muted">No differences were found.</p>}</div>}
+      {comparison && <div className="comparison-result" aria-live="polite">
+        <div className="comparison-result-heading">
+          <p>Version {comparison.fromVersion} → version {comparison.toVersion} · {comparison.format.toUpperCase()}</p>
+          {comparison.comparisonType === "text" && <div className="comparison-view-toggle" role="group" aria-label="Comparison view">
+            <button type="button" className={viewMode === "changes" ? "active" : ""} onClick={() => setViewMode("changes")}>Changes only</button>
+            <button type="button" className={viewMode === "full" ? "active" : ""} onClick={() => setViewMode("full")}>Full comparison</button>
+          </div>}
+        </div>
+        {comparison.comparisonType === "spreadsheet" ? <SpreadsheetDiffViewer comparison={comparison} /> : <TextDiffViewer comparison={comparison} showAll={viewMode === "full"} />}
+      </div>}
     </div>
   );
 }

@@ -1,252 +1,218 @@
-# DigiDocs architecture and design rationale
+# Unpile architecture and design rationale
 
-This document describes the architecture that is actually implemented in the
-DigiDocs proof of concept. The required technologies from the assessment are
-used as the implementation stack; the design decisions below explain how the
-components are organized and why.
+This document describes the architecture actually implemented in the Unpile
+proof of concept. The assessment-mandated technologies are the implementation
+stack; the design decisions below explain how responsibilities are separated
+within that stack.
 
 ## System architecture
 
 ```mermaid
 flowchart LR
-    Browser["Employee browser\nNext.js App Router"]
-    UI["Frontend UI\nUploadForm · SearchPanel\nDocument detail page"]
-    Client["Shared API client\nfrontend/lib/api.js\nDemo-user constants"]
+    Browser["Employee browser"] --> UI["Next.js App Router + React\nHome, browse, search, upload, details, comparison UI"]
+    UI --> Client["Shared API client\nJavaScript / HTTP\nfrontend/lib/api.js"]
+    Client -->|HTTP JSON and multipart\nx-demo-user-id demo header| API
 
-    Browser --> UI
-    UI --> Client
-    Client -->|HTTP JSON + multipart\nx-demo-user-id demo header| API
-
-    subgraph API["Express REST API · port 5000"]
-        Routes["Routes\n/api/documents"]
-        Upload["Upload middleware\nMulter · 25 MB · extension allowlist"]
-        Controllers["Controllers\nHTTP status and response mapping"]
-        Services["Services\nvalidation · transactions\nauthorization · file coordination"]
-        Repository["Repository\nparameterized PostgreSQL queries"]
-        Routes --> Upload
-        Routes --> Controllers
+    subgraph API["REST backend: Node.js + Express :5000"]
+        Routes["Routes\n/api/documents"] --> Upload["Upload middleware\nMulter: 25 MB + allowlist"]
+        Routes --> Controllers["Controllers\nNode.js / JavaScript\nHTTP parsing and responses"]
         Upload --> Controllers
-        Controllers --> Services
-        Services --> Repository
+        Controllers --> Services["Business services\nNode.js / JavaScript\nvalidation, transactions, orchestration"]
+        Services --> Auth["Authorization\nservice + repository permission checks"]
+        Services --> Repo["Repositories\nPostgreSQL client pg\nparameterized SQL"]
+        Auth --> Repo
+        Services --> Compare["Comparison orchestration\nversionComparisonService.js"]
+        Compare --> Extractors["Format extractors\nTXT: fs\nDOCX: mammoth\nPDF: pdfjs-dist\nXLSX: xlsx"]
+        Extractors --> Diff["Diff utilities\ntextDiff.js + spreadsheetDiff.js"]
     end
 
-    Repository -->|SQL over pg| DB[("PostgreSQL 17\nmetadata · tags · permissions\nusers · versions")]
-    Services -->|generated UUID file names\nconfigured storage root| FS[("Local filesystem\nbackend/uploads")]
-    Services --> Hash["Duplicate hashing\nNode.js crypto + fs streams\nSHA-256"]
-    Hash -->|streamed file reads| FS
-    Services --> Compare["TXT version comparison\nNode.js fs + bounded line diff"]
-    Compare -->|authorized version reads| FS
+    Repo -->|SQL queries| DB[("PostgreSQL 17\nmetadata, tags, permissions, versions")]
+    Services -->|UUID file writes and safe reads| FS[("Local filesystem\nbackend/uploads")]
+    Services --> Hash["SHA-256 hashing\nNode.js crypto + fs streams"]
+    Hash -->|streamed reads| FS
+    Extractors -->|authorized bounded reads| FS
+    Diff -->|structured results| Client
     Docker["Docker Compose\nPostgreSQL + named volume"] --> DB
+    Tests["Automated tests\nNode.js node:test\nisolated DB + temp storage"] -. verifies .-> API
 
     style Browser fill:#e8f5f2,stroke:#0d746b
+    style UI fill:#e8f5f2,stroke:#0d746b
     style API fill:#f5f7f8,stroke:#6d7d86
     style DB fill:#fff2df,stroke:#e99552
     style FS fill:#fff2df,stroke:#e99552
     style Hash fill:#e8f5f2,stroke:#0d746b
     style Compare fill:#e8f5f2,stroke:#0d746b
+    style Extractors fill:#e8f5f2,stroke:#0d746b
+    style Diff fill:#e8f5f2,stroke:#0d746b
+    style Auth fill:#e8f5f2,stroke:#0d746b
 ```
 
-The Stage 1 Smart Document Guard components are deliberately kept inside the
-existing service boundary. Hashing uses Node.js `crypto` with streamed
-filesystem reads, while TXT comparison uses Node.js filesystem reads and a
-bounded internal line-diff utility. No file-format parser or comparison logic
-is placed in routes, controllers, repositories, or the browser.
+The frontend never parses uploaded files. It sends comparison requests through
+the shared API client and renders the backend's normalized text or spreadsheet
+result. Docker Compose provisions PostgreSQL; it is not in the request path.
 
-### Runtime boundaries
+The frontend routes are organized as follows:
 
-- The browser owns presentation state and sends requests through the shared
-  frontend API helper in [frontend/lib/api.js](../frontend/lib/api.js).
-- Next.js is the required App Router frontend. The interactive upload/search
-  screens are split into reusable client components in
-  [frontend/app/components/](../frontend/app/components/).
-- Express is the required backend framework. Routes connect middleware to
-  controllers in [backend/src/routes/documentRoutes.js](../backend/src/routes/documentRoutes.js).
-- Controllers translate HTTP input/output and delegate business work to
-  [backend/src/services/documentService.js](../backend/src/services/documentService.js).
-- Services validate input, coordinate transactions, enforce access rules, and
-  coordinate database/file operations.
-- Repositories in [backend/src/repositories/documentRepository.js](../backend/src/repositories/documentRepository.js)
-  contain PostgreSQL access and parameterized SQL only.
-- PostgreSQL stores metadata and relationships. File bytes are stored on the
-  local filesystem, while the database stores each version's generated path
-  and original filename.
+- `/` is the workspace home with title search, primary actions, and a compact
+  permission-filtered available-document list.
+- `/search` provides title search through the existing `title` API filter plus
+  optional tag and uploader filters. The `q` URL parameter is mapped to the
+  backend title filter because the API does not expose one unified search
+  parameter.
+- `/documents` provides permission-filtered browsing with bounded API
+  pagination.
+- `/upload` hosts the existing upload form and preserves its validation,
+  duplicate feedback, and success link.
+- `/documents/:id` provides authorized metadata, version history, comparison,
+  latest download, and new-version upload.
+
+The selected demo user is shared through a small React context backed by
+`localStorage` for this proof of concept. It is a simulated identity, not
+production authentication; every API request still sends the existing
+`x-demo-user-id` header and the backend remains the authorization boundary.
+
+The homepage also provides a browser-local Recently viewed convenience. The
+frontend stores only up to six document IDs under a key scoped to the selected
+demo user. When the home page loads, each ID is revalidated through the normal
+permission-aware document detail endpoint; inaccessible or missing documents
+are omitted and no cached titles, contents, or authorization decisions are
+trusted. This history is not synchronized between browsers or devices and is
+not repository data.
 
 ## Why the backend is layered
 
-The application keeps HTTP concerns, business rules, and SQL separate because
-they change for different reasons:
+- Routes define endpoint composition and connect Multer to controllers.
+- Controllers parse HTTP input, map errors/status codes, and shape responses.
+- Services own validation, authorization, transactions, version allocation,
+  file coordination, and comparison orchestration.
+- Repositories contain parameterized PostgreSQL queries and permission-aware
+  retrieval methods.
+- Comparison extractors read files and return normalized representations. They
+  do not access HTTP requests or the database.
+- Diff utilities compare normalized values without filesystem, HTTP, or SQL
+  responsibilities.
 
-1. Routes define endpoint composition and upload middleware.
-2. Controllers handle request parsing, status codes, response shape, and
-   cleanup callbacks.
-3. Services own validation, authorization, transaction boundaries, version
-   allocation, and storage coordination.
-4. Repositories own SQL and database result retrieval.
-
-This structure makes the business rules testable without coupling them to a
-particular route and makes it possible to replace the local filesystem or the
-demo identity mechanism later without rewriting the SQL layer.
+This keeps format parsing replaceable and testable without putting business
+rules in routes or binary parsing in the browser.
 
 ## Data model and integrity
 
-The normalized schema in [database/schema.sql](../database/schema.sql) uses:
+[database/schema.sql](../database/schema.sql) uses normalized relationships:
+users belong to departments; documents belong to uploaders; tags use the
+`document_tags` join table; restricted access uses `document_permissions`; and
+immutable files are represented by `document_versions`. Foreign keys and
+composite keys protect relationships, while `UNIQUE (document_id,
+version_number)` and parent-row `FOR UPDATE` locking serialize version numbers.
 
-- `users` linked to `departments`.
-- `documents` linked to the uploading user.
-- `tags` and `document_tags` for the document/tag many-to-many relationship.
-- `document_versions` for immutable file history and unique per-document
-  version numbers.
-- `document_permissions` for the document/department many-to-many access list.
-
-Foreign keys protect relationships, composite primary keys prevent duplicate
-tag/permission links, and `UNIQUE (document_id, version_number)` prevents
-duplicate version numbers. Version uploads lock the parent document with
-`FOR UPDATE` before calculating the next number, so concurrent uploads are
-serialized for the same document.
-
-Search uses PostgreSQL parameterized queries, bounded `limit`/`offset`
-pagination, and trigram indexes for substring search. The migration in
-[database/migrations/001_search_indexes.sql](../database/migrations/001_search_indexes.sql)
-updates existing databases without deleting data.
-
-## File storage and consistency
-
-Multer writes files to a configurable storage root. The default is
-`backend/uploads`; integration tests inject a temporary directory. Physical
-filenames are generated with UUIDs, so user-controlled original names are not
-used as filesystem paths. Original names are retained only as download/display
+PostgreSQL stores metadata and relationships. Physical bytes remain separate on
+the filesystem, with UUID storage names and original filenames retained as
 metadata.
 
-The backend limits uploads to 25 MB and accepts PDF, DOCX, TXT, and XLSX
-extensions. The service stores the database records inside a PostgreSQL
-transaction. If validation or a database operation fails, the controller
-removes the newly written file. This is best-effort compensation: PostgreSQL
-cannot roll back a filesystem write after a process crash, so production would
-need reconciliation or object-storage lifecycle handling.
+## Security and authorization
 
-Downloads never expose the stored path directly. The service first performs
-the same access query used by document details, resolves the configured
-storage root, uses the generated basename, verifies the file exists, and then
-passes the safe path to Express.
+Search, details, downloads, version history, version uploads, and comparisons
+all use permission-aware backend queries. Unauthorized restricted documents
+return an empty search result or `404`; the comparison service authorizes both
+versions before reading either file. Stored paths are resolved under the
+configured upload root, and client-provided paths are never accepted.
 
-## Authorization model
-
-Restricted documents are visible only when the selected demo user belongs to
-one of the departments in `document_permissions`. The access predicate is
-applied in repository queries used by search, details, downloads, version
-uploads, and version history. Unauthorized restricted documents return an
-empty search result or `404 Document not found`, preventing ID guessing from
-revealing their existence.
-
-The demo-user selector is simulated identity for the assessment only. The
-`x-demo-user-id` header is user-controlled and is not secure authentication.
-Upload requests additionally require the header value to match `uploaderId`.
-A production implementation would replace this mechanism with authenticated
-sessions or signed tokens and derive the user identity server-side.
+The demo-user selector and `x-demo-user-id` header simulate identity for this
+POC only. They are user-controlled and are not production authentication.
+Production deployment would derive identity from an authenticated session or
+signed token.
 
 ## Request flows
 
 ### Upload
 
-1. The frontend validates title, file selection, restriction choices, and the
-   25 MB limit.
-2. Multer validates the extension, enforces the 25 MB backend limit, and writes
-   a UUID-named file.
-3. The controller passes multipart data to the service.
-4. The service validates the selected demo identity, uploader, tags,
-   departments, and restriction rules.
-5. A transaction inserts the document, version 1, tags, and permissions.
-6. Failure rolls back database changes and removes the new physical file.
+The browser validates the form, Multer enforces the 25 MB/type rules, and the
+service validates identity, metadata, tags, and departments. A PostgreSQL
+transaction inserts the document, version 1, tags, and permissions. If the
+transaction fails, the controller removes the newly written physical file as
+best-effort compensation.
 
-### Search
+### Search and detail
 
-1. The frontend sends title, tag, uploader, pagination, and demo-user header.
-2. The service validates identity and pagination bounds.
-3. The repository applies the permission predicate before search filters.
-4. PostgreSQL returns only visible documents with current-version metadata and
-   pagination totals.
-
-### Authorization and detail
-
-The detail, history, version-upload, and download services validate the demo
-user, query the document through the permission-aware repository method, and
-return `404` when the document is missing or unauthorized.
+The browser sends filters and demo identity. The service validates pagination
+and identity; the repository applies authorization before title/tag/uploader
+filters. Detail and history queries return only authorized documents.
 
 ### Download
 
-The backend authorizes first, resolves the latest version by highest version
-number, verifies the path is within the configured storage directory, and
-streams the file through Express using the original filename as the download
-name.
+The service authorizes first, selects the highest version, verifies the safe
+storage path, and streams the file with the retained original filename.
 
 ### New version
 
-The version endpoint starts a transaction, locks the document row, authorizes
-the user, calculates `MAX(version_number) + 1`, inserts a new immutable version,
-and commits. Previous database records and physical files remain available in
-the history.
+The version endpoint authorizes the document, locks its row, calculates the
+next version number, stores a new immutable file/record, and leaves previous
+versions untouched. The UI refreshes current metadata and comparison controls.
 
-## Setup architecture
+### Comparison
 
-[docker-compose.yml](../docker-compose.yml) starts PostgreSQL 17 with a named
-volume. On a genuinely fresh volume, the official PostgreSQL image executes
-the mounted schema and seed scripts in order. Existing volumes are not
-reinitialized. The idempotent seed statements and the explicit search-index
-migration make setup behavior clear without destroying existing development
-data.
+`GET /api/documents/:id/compare?fromVersion=1&toVersion=2` validates IDs,
+authorization, format compatibility, file-size limits, and parser output.
+TXT, DOCX, and PDF normalize to bounded text and use the existing text diff.
+XLSX normalizes worksheets/cells and reports sheet and cell changes. The
+backend returns safe `415`, `422`, or `413` errors for incompatible, malformed,
+unreadable, or oversized comparisons.
+
+## Stage 1 Smart Document Guard
+
+Stage 1 is implemented in [fileHasher.js](../backend/src/utils/fileHasher.js),
+[002_content_hashes.sql](../database/migrations/002_content_hashes.sql), and
+the document service. SHA-256 is streamed with Node.js `crypto`; duplicate
+checks are permission-aware, concurrent checks are serialized, and rejected
+files are cleaned up. TXT comparison is bounded to 5 MB files, 500,000
+characters, and 10,000 lines.
+
+## Stage 2 multi-format comparison
+
+Stage 2 is implemented in:
+
+- [versionComparisonService.js](../backend/src/services/versionComparisonService.js)
+  for authorization, version lookup, limits, format selection, and response
+  orchestration.
+- [format.js](../backend/src/services/comparison/format.js) and [limits.js](../backend/src/services/comparison/limits.js)
+  for shared format and resource rules.
+- [txtExtractor.js](../backend/src/services/comparison/extractors/txtExtractor.js),
+  [docxExtractor.js](../backend/src/services/comparison/extractors/docxExtractor.js),
+  [pdfExtractor.js](../backend/src/services/comparison/extractors/pdfExtractor.js),
+  and [xlsxExtractor.js](../backend/src/services/comparison/extractors/xlsxExtractor.js)
+  for normalized representations.
+- [spreadsheetDiff.js](../backend/src/services/comparison/spreadsheetDiff.js)
+  for worksheet/cell-aware XLSX results.
+- [VersionComparison.js](../frontend/app/components/VersionComparison.js)
+  for safe text and spreadsheet rendering.
+
+DOCX comparison focuses on readable paragraph content, not pixel-perfect
+formatting. PDF comparison supports text-based PDFs, preserves page boundaries
+where practical, and does not provide OCR, layout, image, or visual comparison.
+XLSX comparison does not execute macros or formulas and does not compare
+formatting, charts, or images; it compares values and formula text by cell.
+
+Processing limits are 5 MB per stored version, 500,000 extracted text
+characters, 100 worksheets, and 100,000 workbook cells. These limits reduce
+the risk of excessive archive expansion, memory usage, and diff work.
 
 ## Implemented versus future improvements
 
-Implemented in this POC:
+Implemented:
 
-- Layered Express backend.
-- PostgreSQL normalized schema and constraints.
-- Local UUID-based file storage.
-- Upload validation and compensating cleanup.
-- Department-aware search, details, downloads, version uploads, and history.
-- Bounded search pagination and trigram indexes.
-- Next.js App Router UI with shared API utilities and reusable components.
-- Isolated backend integration tests, including concurrent versions.
+- Layered Express backend and normalized PostgreSQL schema.
+- Local UUID-based versioned file storage with cleanup handling.
+- Department-aware search, details, downloads, versions, and comparisons.
+- TXT, DOCX, text-based PDF, and XLSX comparison.
+- Next.js App Router UI with upload-version workflow and structured results.
+- Isolated integration tests, malformed-file tests, permission tests, and
+  concurrent-version tests.
 
-Intentionally deferred:
+Deferred:
 
 - Production authentication and role-based authorization.
 - Object storage and multi-instance filesystem coordination.
-- File-content inspection, malware scanning, and orphan-file reconciliation.
-- Historical-version download endpoints.
-- Redis caching, microservices, and DOCX/PDF/XLSX comparison.
-- Advanced frontend pagination controls.
+- OCR, malware scanning, orphan-file reconciliation, and historical-version
+  download endpoints.
+- Redis caching, microservices, and advanced frontend pagination controls.
 
-These are future production improvements, not prerequisites for the required
-proof of concept.
-
-## Smart Document Guard Stage 1
-
-Implemented as a bonus extension:
-
-- SHA-256 is calculated from uploaded bytes using the reusable streaming
-  utility in [backend/src/utils/fileHasher.js](../backend/src/utils/fileHasher.js).
-- Hashes are stored per immutable row in `document_versions`; there is no
-  global uniqueness constraint because identical bytes may legitimately exist
-  in separate documents or departments.
-- New-document duplicate checks query only documents accessible to the selected
-  demo user. An inaccessible restricted document is never disclosed.
-- Same-document duplicate versions are rejected after the existing parent-row
-  lock is acquired. New-document duplicate checks use a PostgreSQL transaction
-  advisory lock keyed by the hash to reduce concurrent races.
-- Rejected duplicate files are removed through the existing upload cleanup path.
-- Existing records can have a nullable hash. The idempotent
-  `npm run backfill:hashes` command streams existing files and fills missing
-  hashes without deleting or replacing records.
-- TXT versions can be compared through
-  `GET /api/documents/:id/compare?fromVersion=1&toVersion=2`. The service
-  authorizes the document before reading either version and returns bounded
-  added, removed, changed, and unchanged sections.
-- TXT comparison is limited to 5 MB files, 500,000 extracted characters, and
-  10,000 lines per version. Historical files are never modified.
-
-Deferred to a later stage:
-
-- DOCX paragraph extraction and comparison.
-- PDF text-layer extraction; scanned PDFs would require OCR.
-- XLSX sheet/cell-aware comparison.
+These are production follow-ups, not hidden claims about current POC behavior.

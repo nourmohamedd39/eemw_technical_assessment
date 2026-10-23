@@ -90,7 +90,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
     try {
       const response = await apiRequest("/documents", { method: "POST", demoUserId, body: formData });
       const payload = await response.json();
-      setUploadMessage(`Document uploaded successfully: ${payload.document.title}`);
+      setUploadMessage(payload.document);
       setTitle("");
       setDescription("");
       setTags("");
@@ -125,7 +125,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
         <label className="switch-row"><input type="checkbox" checked={isRestricted} onChange={(event) => setIsRestricted(event.target.checked)} /><span className="switch-control" /><span><strong>Restrict by department</strong><small>Only selected departments can view this document.</small></span></label>
         {isRestricted && <fieldset className="department-list"><legend>Allowed departments</legend>{departments.map((department) => <label key={department.id} className="check-row"><input type="checkbox" checked={allowedDepartments.includes(department.id)} onChange={() => toggleDepartment(department.id)} /><span>{department.name}</span></label>)}</fieldset>}
         {uploadError && <p className="alert error" role="alert">{uploadError}{duplicateDocument && <><br /><Link className="duplicate-link" href={`/documents/${duplicateDocument.id}`}>Open the existing document</Link></>}</p>}
-        {uploadMessage && <p className="alert success" role="status">{uploadMessage}</p>}
+        {uploadMessage && <p className="alert success" role="status">Document uploaded successfully: <Link className="duplicate-link" href={`/documents/${uploadMessage.id}`}>{uploadMessage.title}</Link></p>}
         <button className="primary-button" type="submit" disabled={uploading}>{uploading ? "Uploading..." : "Upload document"}</button>
       </form>
     </div>

@@ -8,6 +8,9 @@ const { promisify } = require("node:util");
 const { test } = require("node:test");
 const { Client } = require("pg");
 const dotenv = require("dotenv");
+const JSZip = require("jszip");
+const XLSX = require("xlsx");
+const PDFDocument = require("pdfkit");
 
 const backendDirectory = path.resolve(__dirname, "..");
 dotenv.config({ path: path.join(backendDirectory, ".env") });
@@ -116,6 +119,54 @@ function uploadForm({ title, uploaderId = "1", isRestricted = "false", departmen
   form.append("tags", tags);
   form.append("file", new Blob([content], { type: fileType }), fileName);
   return form;
+}
+
+function binaryUploadForm({ title, uploaderId = "1", fileName, content, fileType = "application/octet-stream" }) {
+  const form = new FormData();
+  if (title !== undefined) form.append("title", title);
+  form.append("uploaderId", uploaderId);
+  form.append("isRestricted", "false");
+  form.append("tags", "stage2");
+  form.append("file", new Blob([content], { type: fileType }), fileName);
+  return form;
+}
+
+const escapeXml = (value) => String(value)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&apos;");
+
+async function docxFixture(paragraphs) {
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphs.map((paragraph) => `<w:p><w:r><w:t>${escapeXml(paragraph)}</w:t></w:r></w:p>`).join("")}<w:sectPr/></w:body></w:document>`);
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+function pdfFixture(text) {
+  return new Promise((resolve) => {
+    const document = new PDFDocument();
+    const chunks = [];
+    document.on("data", (chunk) => chunks.push(chunk));
+    document.on("end", () => resolve(Buffer.concat(chunks)));
+    const pages = Array.isArray(text) ? text : [text];
+    pages.forEach((pageText, index) => {
+      if (index > 0) document.addPage();
+      if (pageText) document.text(pageText);
+    });
+    document.end();
+  });
+}
+
+function xlsxFixture(rows, extraSheet) {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Summary");
+  if (extraSheet) XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Added sheet"]]), extraSheet);
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 }
 
 async function json(response) {
@@ -368,6 +419,95 @@ test("document API integration suite", async (t) => {
 
       const missing = await request("/documents/99999/compare?fromVersion=1&toVersion=2", { demoUserId: 1 });
       assert.equal(missing.status, 404);
+    });
+
+    await t.test("compares DOCX, PDF, and XLSX versions with format-specific results", async () => {
+      const docxV1 = await docxFixture(["Project overview", "Original paragraph"]);
+      const docxV2 = await docxFixture(["Project overview", "Updated paragraph", "New paragraph"]);
+      const pdfV1 = await pdfFixture(["PDF first version", "PDF first second page"]);
+      const pdfV2 = await pdfFixture(["PDF second version", "PDF second second page"]);
+      const xlsxV1 = xlsxFixture([["Name", "Status"], ["Policy", "Draft"]]);
+      const xlsxV2 = xlsxFixture([["Name", "Status"], ["Policy", "Approved"]], "Changes");
+
+      const cases = [
+        { name: "DOCX", extension: "docx", first: docxV1, second: docxV2, expected: (payload) => {
+          assert.equal(payload.format, "docx");
+          assert.equal(payload.comparisonType, "text");
+          assert.ok(payload.changes.some((change) => change.type === "changed" || change.type === "added"));
+        } },
+        { name: "PDF", extension: "pdf", first: pdfV1, second: pdfV2, expected: (payload) => {
+          assert.equal(payload.format, "pdf");
+          assert.equal(payload.comparisonType, "text");
+          assert.ok(payload.changes.some((change) => change.type === "changed"));
+        } },
+        { name: "XLSX", extension: "xlsx", first: xlsxV1, second: xlsxV2, expected: (payload) => {
+          assert.equal(payload.format, "xlsx");
+          assert.equal(payload.comparisonType, "spreadsheet");
+          assert.deepEqual(payload.addedSheets, ["Changes"]);
+          assert.ok(payload.changes.some((change) => change.type === "changed" && change.cell === "B2"));
+        } },
+      ];
+
+      for (const comparisonCase of cases) {
+        const firstResponse = await request("/documents", {
+          method: "POST",
+          demoUserId: 1,
+          body: binaryUploadForm({
+            title: `${comparisonCase.name} comparison`,
+            fileName: `comparison-v1.${comparisonCase.extension}`,
+            content: comparisonCase.first,
+          }),
+        });
+        assert.equal(firstResponse.status, 201);
+        const documentIdForFormat = (await json(firstResponse)).document.id;
+
+        const secondResponse = await request(`/documents/${documentIdForFormat}/versions`, {
+          method: "POST",
+          demoUserId: 1,
+          body: binaryUploadForm({
+            fileName: `comparison-v2.${comparisonCase.extension}`,
+            content: comparisonCase.second,
+          }),
+        });
+        assert.equal(secondResponse.status, 201);
+
+        const comparisonResponse = await request(`/documents/${documentIdForFormat}/compare?fromVersion=1&toVersion=2`, { demoUserId: 1 });
+        const comparisonPayload = await json(comparisonResponse);
+        assert.equal(comparisonResponse.status, 200, `${comparisonCase.name}: ${JSON.stringify(comparisonPayload)}`);
+        comparisonCase.expected(comparisonPayload);
+      }
+
+      const malformedResponse = await request("/documents", {
+        method: "POST",
+        demoUserId: 1,
+        body: binaryUploadForm({ title: "Malformed DOCX", fileName: "malformed.docx", content: Buffer.from("not a docx") }),
+      });
+      assert.equal(malformedResponse.status, 201);
+      const malformedId = (await json(malformedResponse)).document.id;
+      const malformedVersion = await request(`/documents/${malformedId}/versions`, {
+        method: "POST",
+        demoUserId: 1,
+        body: binaryUploadForm({ fileName: "malformed-2.docx", content: Buffer.from("also not a docx") }),
+      });
+      assert.equal(malformedVersion.status, 201);
+      const malformedComparison = await request(`/documents/${malformedId}/compare?fromVersion=1&toVersion=2`, { demoUserId: 1 });
+      assert.equal(malformedComparison.status, 422);
+
+      const blankPdf = await request("/documents", {
+        method: "POST",
+        demoUserId: 1,
+        body: binaryUploadForm({ title: "Blank PDF", fileName: "blank.pdf", content: await pdfFixture("") }),
+      });
+      assert.equal(blankPdf.status, 201);
+      const blankPdfId = (await json(blankPdf)).document.id;
+      const blankPdfVersion = await request(`/documents/${blankPdfId}/versions`, {
+        method: "POST",
+        demoUserId: 1,
+        body: binaryUploadForm({ fileName: "blank-2.pdf", content: await pdfFixture(" ") }),
+      });
+      assert.equal(blankPdfVersion.status, 201);
+      const blankPdfComparison = await request(`/documents/${blankPdfId}/compare?fromVersion=1&toVersion=2`, { demoUserId: 1 });
+      assert.equal(blankPdfComparison.status, 422);
     });
 
     await t.test("cleans up failed version uploads and rejects invalid IDs", async () => {

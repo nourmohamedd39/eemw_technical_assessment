@@ -1,8 +1,26 @@
-# DigiDocs demonstration checklist
+# Unpile demonstration checklist
 
 This is a short, repeatable walkthrough for recording or presenting the POC.
 It demonstrates the required behavior without requiring production
 authentication.
+
+## Unpile workflow
+
+1. Open the home workspace and confirm the Unpile wordmark, navigation, search
+   bar, and accessible-document preview are visible.
+2. Change `Viewing as` and open Browse documents. Confirm the list refreshes
+   and restricted documents are filtered by the selected demo user.
+3. Search from the home page for a title. Confirm navigation to `/search?q=...`
+   and verify the result count and document links.
+4. Use the tag and uploader filters on the search page, then exercise Previous
+   and Next when the result set is larger than one page.
+5. Open Upload document, submit a valid file, and confirm the success link to
+   the new document. Demonstrate invalid type, oversized-file, missing-title,
+   and duplicate-file feedback if needed.
+6. Open document details, download the latest version, inspect version history,
+   upload a new version, and refresh the current metadata.
+7. Compare two compatible versions and show the comparison result. The
+   backend continues to enforce all department permissions.
 
 ## Before the demonstration
 
@@ -43,7 +61,7 @@ Open [architecture.md](./architecture.md) and point out:
 - PostgreSQL metadata and relationship storage.
 - Separate local file storage.
 - Server-side permission checks.
-- Stage 1 SHA-256 duplicate detection and TXT comparison.
+- Stage 1 SHA-256 duplicate detection and Stage 2 multi-format comparison.
 
 State clearly that the demo-user selector is simulated identity for the POC,
 not production authentication.
@@ -80,20 +98,22 @@ metadata, version 1, tags, and permissions in a transaction.
 7. If an existing restricted document is opened by ID, show the graceful
    access error rather than metadata or a file.
 
-### 5. Demonstrate duplicate protection and TXT comparison
+### 5. Demonstrate duplicate protection and version comparison
 
 1. Upload a small TXT file.
 2. Upload the same bytes again with a different filename and show the clear
    duplicate response. An inaccessible restricted match is never disclosed.
-3. Add a different TXT version through the version endpoint.
-4. Open the detail page, choose two versions, and click **Compare versions**.
-5. Show unchanged, added, removed, or changed sections.
-6. Explain that DOCX, PDF, and XLSX comparison is intentionally deferred.
+3. Open the detail page and click **Upload new version** inside Version history.
+4. Upload a different version in the same format.
+5. Choose two versions and click **Compare versions**.
+6. Show added, removed, or changed text for TXT/DOCX/PDF, or changed cells and
+   worksheet additions/removals for XLSX.
+7. Explain that PDF comparison supports text layers only; OCR, visual layout,
+   DOCX formatting, and XLSX charts/images are not compared.
 
 ### 6. Demonstrate version history
 
-The current UI displays history but does not expose a version-upload control.
-Use the API for this portion if required:
+The current UI exposes the version-upload control. The API equivalent is:
 
 ```powershell
 curl.exe -X POST http://localhost:5000/api/documents/<DOCUMENT_ID>/versions `
@@ -101,8 +121,13 @@ curl.exe -X POST http://localhost:5000/api/documents/<DOCUMENT_ID>/versions `
   -F "file=@$env:TEMP\new-version.txt"
 ```
 
-Refresh the detail page and show that the new version is current while the
-previous version remains in the history.
+Refresh is automatic after the UI upload; show that the new version is current,
+the latest download is updated, and the previous version remains in history.
+
+### 7. Optional multi-format comparison checks
+
+Repeat the version workflow with one small DOCX, one text-based PDF, and one
+XLSX workbook. For an image-only PDF, show the clear unsupported/OCR message.
 
 ## Closing points
 

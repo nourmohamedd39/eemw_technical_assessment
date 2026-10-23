@@ -1,14 +1,15 @@
 import "./globals.css";
+import { DemoUserProvider } from "./components/DemoUserContext";
 
 export const metadata = {
-  title: "DigiDocs",
-  description: "A proof-of-concept corporate document repository.",
+  title: "Unpile | Corporate document workspace",
+  description: "Turn document clutter into clarity with Unpile.",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><DemoUserProvider>{children}</DemoUserProvider></body>
     </html>
   );
 }

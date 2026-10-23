@@ -1,9 +1,9 @@
-# DigiDocs
+# Unpile
 
 A full-stack proof-of-concept document repository built with
 Next.js, Node.js, Express, and PostgreSQL.
 
-DigiDocs lets employees upload, organize, search, view, download, and version
+Unpile lets employees upload, organize, search, view, download, and version
 corporate documents. Metadata and relationships are stored in PostgreSQL,
 while versioned file bytes are stored separately on the local filesystem.
 
@@ -13,6 +13,8 @@ while versioned file bytes are stored separately on the local filesystem.
 - [Assessment compliance checklist](docs/assessment-compliance.md)
 - [Demonstration and video preparation checklist](docs/demo-checklist.md)
 - [Original Technical Assessment PDF](<docs/Technical Assessment.pdf>)
+
+The user-facing product is branded Unpile; internal repository and API identifiers remain unchanged for compatibility.
 
 The architecture document is the primary technical deliverable. It includes a
 system diagram, layer responsibilities, data model, authorization boundaries,
@@ -59,6 +61,15 @@ run dev`, then open `http://localhost:3000`. The frontend uses
 `http://localhost:5000/api` by default; set `NEXT_PUBLIC_API_URL` in
 `frontend/.env.local` to override it.
 
+The frontend workspace is organized into dedicated routes: `/` provides title
+search, primary actions, and a compact authorized-document preview; `/search`
+provides title, tag, and uploader filters with URL state; `/documents` provides
+permission-filtered browsing with bounded pagination; `/upload` hosts the
+document upload form; and `/documents/:id` provides authorized details,
+versions, downloads, and comparisons. The selected proof-of-concept demo user
+is shared across navigation through a small client context and local storage,
+while the backend remains responsible for authorization.
+
 ## Demo user access
 
 Authentication is not implemented in this proof of concept. The selected
@@ -81,8 +92,9 @@ production authentication.
   `file` multipart field.
 - `GET /api/documents/:id/versions` returns the complete version history.
 - `GET /api/documents/:id/compare?fromVersion=1&toVersion=2` compares two
-  authorized TXT versions. Stage 1 supports bounded TXT comparison only;
-  DOCX, PDF, and XLSX comparison are deferred.
+  authorized versions. TXT and DOCX compare normalized text; text-based PDF
+  comparison uses page-aware extraction; XLSX comparison reports worksheet and
+  cell changes. Both versions must use the same format.
 - Exact duplicate uploads return HTTP `409` when identical content is found
   in an accessible document or version. Restricted inaccessible matches are
   never disclosed.
@@ -94,7 +106,7 @@ creates a unique isolated PostgreSQL test database and temporary upload
 directory, then removes only those test resources. Existing development data,
 uploads, and Docker volumes are not used or modified by the tests.
 
-## Smart Document Guard Stage 1
+## Smart Document Guard Stage 1 and Stage 2
 
 Stage 1 adds streamed SHA-256 hashes to document versions and permission-aware
 exact duplicate detection. Apply the additive migration to an existing
@@ -114,6 +126,21 @@ npm run backfill:hashes
 The backfill is idempotent and preserves all records and files. It skips
 missing files without deleting their metadata. New databases receive the
 column and indexes from `database/schema.sql` automatically.
+
+Stage 2 adds multi-format comparison through the same endpoint. Runtime
+dependencies are `mammoth` for DOCX paragraph extraction, Mozilla's
+`pdfjs-dist` for text-based PDF extraction, and `xlsx` for worksheet/cell
+normalization. `pdfjs-dist` does not provide OCR; scanned/image-only PDFs are
+rejected with a clear error. DOCX formatting and XLSX formatting/charts/images
+are not compared. Comparison processing is bounded by stored file size,
+extracted text, worksheet count, and cell count; see
+[docs/architecture.md](docs/architecture.md) for the exact limits and response
+contract.
+
+The document-details page includes **Upload new version**. After a successful
+upload it refreshes the current metadata, latest download, version history, and
+comparison controls. The frontend renders text results for TXT/DOCX/PDF and a
+worksheet/cell table for XLSX.
 
 ## Submission checklist
 
