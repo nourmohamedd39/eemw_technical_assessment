@@ -80,6 +80,12 @@ production authentication.
   authorized demo user in the `x-demo-user-id` header and the file in the
   `file` multipart field.
 - `GET /api/documents/:id/versions` returns the complete version history.
+- `GET /api/documents/:id/compare?fromVersion=1&toVersion=2` compares two
+  authorized TXT versions. Stage 1 supports bounded TXT comparison only;
+  DOCX, PDF, and XLSX comparison are deferred.
+- Exact duplicate uploads return HTTP `409` when identical content is found
+  in an accessible document or version. Restricted inaccessible matches are
+  never disclosed.
 
 ## Backend tests
 
@@ -87,6 +93,27 @@ Run `cd backend && npm test` to execute the API integration suite. Each run
 creates a unique isolated PostgreSQL test database and temporary upload
 directory, then removes only those test resources. Existing development data,
 uploads, and Docker volumes are not used or modified by the tests.
+
+## Smart Document Guard Stage 1
+
+Stage 1 adds streamed SHA-256 hashes to document versions and permission-aware
+exact duplicate detection. Apply the additive migration to an existing
+database:
+
+```powershell
+Get-Content .\database\migrations\002_content_hashes.sql | docker exec -i eemw-postgres psql -U eemw_user -d eemw_documents
+```
+
+Then backfill hashes for existing physical files:
+
+```powershell
+cd backend
+npm run backfill:hashes
+```
+
+The backfill is idempotent and preserves all records and files. It skips
+missing files without deleting their metadata. New databases receive the
+column and indexes from `database/schema.sql` automatically.
 
 ## Submission checklist
 

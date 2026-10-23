@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { apiRequest, formatBytes, formatFileType } from "../../lib/api";
 import { ALLOWED_FILE_EXTENSIONS, departments, MAX_FILE_SIZE } from "../../lib/constants";
 
@@ -15,6 +16,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState(null);
   const [uploadError, setUploadError] = useState("");
+  const [duplicateDocument, setDuplicateDocument] = useState(null);
 
   const toggleDepartment = (departmentId) => {
     setAllowedDepartments((current) => current.includes(departmentId)
@@ -26,6 +28,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
     const selectedFile = event.target.files?.[0] || null;
     setUploadError("");
     setUploadMessage(null);
+    setDuplicateDocument(null);
 
     if (selectedFile && selectedFile.size > MAX_FILE_SIZE) {
       setFile(null);
@@ -55,6 +58,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
     event.preventDefault();
     setUploadError("");
     setUploadMessage(null);
+    setDuplicateDocument(null);
 
     if (!title.trim()) {
       setUploadError("A document title is required.");
@@ -93,9 +97,11 @@ export default function UploadForm({ demoUserId, onUploaded }) {
       setIsRestricted(false);
       setAllowedDepartments([]);
       setFile(null);
+      setDuplicateDocument(null);
       setFileInputKey((key) => key + 1);
       onUploaded?.();
     } catch (error) {
+      setDuplicateDocument(error.payload?.existingDocument || null);
       setUploadError(error.message || "Unable to upload the document.");
     } finally {
       setUploading(false);
@@ -118,7 +124,7 @@ export default function UploadForm({ demoUserId, onUploaded }) {
         </div>
         <label className="switch-row"><input type="checkbox" checked={isRestricted} onChange={(event) => setIsRestricted(event.target.checked)} /><span className="switch-control" /><span><strong>Restrict by department</strong><small>Only selected departments can view this document.</small></span></label>
         {isRestricted && <fieldset className="department-list"><legend>Allowed departments</legend>{departments.map((department) => <label key={department.id} className="check-row"><input type="checkbox" checked={allowedDepartments.includes(department.id)} onChange={() => toggleDepartment(department.id)} /><span>{department.name}</span></label>)}</fieldset>}
-        {uploadError && <p className="alert error" role="alert">{uploadError}</p>}
+        {uploadError && <p className="alert error" role="alert">{uploadError}{duplicateDocument && <><br /><Link className="duplicate-link" href={`/documents/${duplicateDocument.id}`}>Open the existing document</Link></>}</p>}
         {uploadMessage && <p className="alert success" role="status">{uploadMessage}</p>}
         <button className="primary-button" type="submit" disabled={uploading}>{uploading ? "Uploading..." : "Upload document"}</button>
       </form>

@@ -3,9 +3,14 @@ import { API_URL } from "./constants";
 export async function getApiError(response) {
   try {
     const payload = await response.json();
-    return payload.message || "The request could not be completed.";
+    const error = new Error(payload.message || "The request could not be completed.");
+    error.status = response.status;
+    error.payload = payload;
+    return error;
   } catch {
-    return `The request failed with status ${response.status}.`;
+    const error = new Error(`The request failed with status ${response.status}.`);
+    error.status = response.status;
+    return error;
   }
 }
 
@@ -17,7 +22,7 @@ export async function apiRequest(path, { demoUserId, headers: providedHeaders, .
 
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!response.ok) {
-    throw new Error(await getApiError(response));
+    throw await getApiError(response);
   }
 
   return response;
@@ -34,4 +39,13 @@ export function formatBytes(value) {
 export function formatFileType(filename) {
   const extension = typeof filename === "string" ? filename.split(".").pop() : "";
   return extension ? extension.toUpperCase() : "FILE";
+}
+
+export async function compareDocumentVersions(documentId, fromVersion, toVersion, demoUserId) {
+  const query = new URLSearchParams({
+    fromVersion: String(fromVersion),
+    toVersion: String(toVersion),
+  });
+  const response = await apiRequest(`/documents/${documentId}/compare?${query}`, { demoUserId });
+  return response.json();
 }

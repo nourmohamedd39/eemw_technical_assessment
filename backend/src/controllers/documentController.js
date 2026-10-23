@@ -1,6 +1,7 @@
 
 const fs = require("fs/promises");
 const documentService = require("../services/documentService");
+const versionComparisonService = require("../services/versionComparisonService");
 
 const createDocument = async (req, res) => {
   try {
@@ -37,6 +38,13 @@ const createDocument = async (req, res) => {
         error.status
           ? error.message
           : "An unexpected error occurred while uploading the document.",
+      ...(error.existingDocumentId ? {
+        existingDocument: {
+          id: error.existingDocumentId,
+          title: error.existingDocumentTitle,
+          version: error.existingDocumentVersion,
+        },
+      } : {}),
     });
   }
 };
@@ -183,6 +191,20 @@ const getVersionHistory = async (req, res) => {
   }
 };
 
+const compareDocumentVersions = async (req, res) => {
+  try {
+    const comparison = await versionComparisonService.compareVersions(
+      req.params.id,
+      req.query,
+      getDemoUserId(req)
+    );
+
+    return res.status(200).json(comparison);
+  } catch (error) {
+    return handleReadError(res, error);
+  }
+};
+
 module.exports = {
   createDocument,
   searchDocuments,
@@ -190,4 +212,5 @@ module.exports = {
   downloadDocument,
   uploadDocumentVersion,
   getVersionHistory,
+  compareDocumentVersions,
 };

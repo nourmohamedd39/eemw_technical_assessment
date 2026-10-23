@@ -1,8 +1,10 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const http = require("node:http");
+const { execFile: executeFile } = require("node:child_process");
 const os = require("node:os");
 const path = require("node:path");
+const { promisify } = require("node:util");
 const { test } = require("node:test");
 const { Client } = require("pg");
 const dotenv = require("dotenv");
@@ -25,6 +27,7 @@ const adminDatabaseConfig = {
 
 const schemaPath = path.resolve(backendDirectory, "../database/schema.sql");
 const seedPath = path.resolve(backendDirectory, "../database/seed.sql");
+const execFile = promisify(executeFile);
 
 let app;
 let repository;
@@ -148,6 +151,43 @@ test("document API integration suite", async (t) => {
       assert.equal(payload.document.version, 1);
       assert.deepEqual(payload.document.tags, ["finance", "policy"]);
       assert.equal(await uploadCount(), 1);
+
+      const storedHash = await repository.pool.query(
+        "SELECT content_sha256 FROM document_versions WHERE document_id = $1",
+        [documentId]
+      );
+      assert.match(storedHash.rows[0].content_sha256, /^[0-9a-f]{64}$/);
+
+      await repository.pool.query(
+        "UPDATE document_versions SET content_sha256 = NULL WHERE document_id = $1",
+        [documentId]
+      );
+      await execFile(process.execPath, [path.join(backendDirectory, "scripts/backfillContentHashes.js")], {
+        env: { ...process.env, DB_NAME: testDatabaseName, UPLOAD_DIRECTORY: uploadDirectory },
+      });
+      const restoredHash = await repository.pool.query(
+        "SELECT content_sha256 FROM document_versions WHERE document_id = $1",
+        [documentId]
+      );
+      assert.match(restoredHash.rows[0].content_sha256, /^[0-9a-f]{64}$/);
+    });
+
+    await t.test("rejects accessible exact duplicates and cleans the new file", async () => {
+      const before = await uploadCount();
+      const response = await request("/documents", {
+        method: "POST",
+        demoUserId: 1,
+        body: uploadForm({
+          title: "Same bytes, new filename",
+          fileName: "different-name.txt",
+          content: "policy content",
+        }),
+      });
+
+      assert.equal(response.status, 409);
+      const payload = await json(response);
+      assert.equal(payload.existingDocument.id, documentId);
+      assert.equal(await uploadCount(), before);
     });
 
     await t.test("rejects missing metadata and cleans the uploaded file", async () => {
@@ -258,6 +298,76 @@ test("document API integration suite", async (t) => {
       const latestDownload = await request(`/documents/${documentId}/download`, { demoUserId: 1 });
       assert.equal(latestDownload.status, 200);
       assert.ok(["version two", "version three"].includes(await latestDownload.text()));
+
+      const before = await uploadCount();
+      const duplicateVersion = await request(`/documents/${documentId}/versions`, {
+        method: "POST",
+        demoUserId: 1,
+        body: uploadForm({ fileName: "renamed-version.txt", content: "version two" }),
+      });
+      assert.equal(duplicateVersion.status, 409);
+      assert.equal(await uploadCount(), before);
+    });
+
+    await t.test("does not disclose inaccessible duplicates", async () => {
+      const restricted = await request("/documents", {
+        method: "POST",
+        demoUserId: 1,
+        body: uploadForm({
+          title: "Hidden duplicate source",
+          isRestricted: "true",
+          departmentIds: "1",
+          content: "hidden duplicate bytes",
+        }),
+      });
+      assert.equal(restricted.status, 201);
+
+      const copy = await request("/documents", {
+        method: "POST",
+        demoUserId: 2,
+        body: uploadForm({
+          title: "Finance copy",
+          uploaderId: "2",
+          content: "hidden duplicate bytes",
+          fileName: "finance-copy.txt",
+        }),
+      });
+      assert.equal(copy.status, 201);
+    });
+
+    await t.test("serializes concurrent identical new uploads", async () => {
+      const responses = await Promise.all([
+        request("/documents", { method: "POST", demoUserId: 3, body: uploadForm({ title: "Concurrent A", uploaderId: "3", content: "concurrent bytes" }) }),
+        request("/documents", { method: "POST", demoUserId: 3, body: uploadForm({ title: "Concurrent B", uploaderId: "3", content: "concurrent bytes" }) }),
+      ]);
+
+      assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+    });
+
+    await t.test("compares authorized TXT versions and validates comparison access", async () => {
+      const comparison = await request(`/documents/${documentId}/compare?fromVersion=2&toVersion=3`, { demoUserId: 1 });
+      assert.equal(comparison.status, 200);
+      const payload = await json(comparison);
+      assert.equal(payload.format, "txt");
+      assert.equal(payload.fromVersion, 2);
+      assert.equal(payload.toVersion, 3);
+      assert.ok(payload.changes.some((change) => change.type === "changed"));
+
+      const sameVersion = await request(`/documents/${documentId}/compare?fromVersion=2&toVersion=2`, { demoUserId: 1 });
+      assert.equal(sameVersion.status, 400);
+
+      const restrictedVersion = await request(`/documents/${restrictedDocumentId}/versions`, {
+        method: "POST",
+        demoUserId: 1,
+        body: uploadForm({ fileName: "hidden-version.txt", content: "hidden version content" }),
+      });
+      assert.equal(restrictedVersion.status, 201);
+
+      const unauthorized = await request(`/documents/${restrictedDocumentId}/compare?fromVersion=1&toVersion=2`, { demoUserId: 2 });
+      assert.equal(unauthorized.status, 404);
+
+      const missing = await request("/documents/99999/compare?fromVersion=1&toVersion=2", { demoUserId: 1 });
+      assert.equal(missing.status, 404);
     });
 
     await t.test("cleans up failed version uploads and rejects invalid IDs", async () => {

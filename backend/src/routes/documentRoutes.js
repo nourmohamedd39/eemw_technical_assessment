@@ -9,6 +9,7 @@ const {
   downloadDocument,
   uploadDocumentVersion,
   getVersionHistory,
+  compareDocumentVersions,
 } = require("../controllers/documentController");
 
 const router = express.Router();
@@ -54,6 +55,7 @@ router.post("/", handleUpload, createDocument);
 router.get("/", searchDocuments);
 router.post("/:id/versions", handleUpload, uploadDocumentVersion);
 router.get("/:id/versions", getVersionHistory);
+router.get("/:id/compare", compareDocumentVersions);
 router.get("/:id/download", downloadDocument);
 router.get("/:id", getDocument);
 

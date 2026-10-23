@@ -28,6 +28,8 @@ implementation or documentation that a reviewer can inspect.
 | Docker Compose PostgreSQL setup | Implemented | [docker-compose.yml](../docker-compose.yml), [README.md](../README.md) |
 | Architecture diagram and design rationale | Implemented | [architecture.md](./architecture.md) |
 | Automated verification | Implemented | [documentApi.test.js](../backend/test/documentApi.test.js) |
+| Stage 1 exact duplicate detection bonus | Implemented | [fileHasher.js](../backend/src/utils/fileHasher.js), [002_content_hashes.sql](../database/migrations/002_content_hashes.sql), [documentApi.test.js](../backend/test/documentApi.test.js) |
+| Stage 1 TXT version comparison bonus | Implemented | [versionComparisonService.js](../backend/src/services/versionComparisonService.js), [VersionComparison.js](../frontend/app/components/VersionComparison.js) |
 | GitHub repository and POC video | Submission action | Must be supplied by the candidate after local verification |
 
 ## Verification commands
@@ -57,3 +59,8 @@ uploads.
   download endpoints.
 - The frontend currently relies on the API's bounded default page rather than
   exposing page-navigation controls.
+- Smart Document Guard Stage 1 compares TXT versions only. DOCX, PDF, and XLSX
+  extraction/comparison are deferred.
+- Existing version hashes are populated by the documented idempotent backfill
+  command; missing physical files remain metadata-only and are reported as
+  skipped.

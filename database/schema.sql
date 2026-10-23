@@ -53,6 +53,8 @@ CREATE TABLE document_versions (
     mime_type VARCHAR(150) NOT NULL,
     file_size BIGINT NOT NULL
         CHECK (file_size >= 0),
+    content_sha256 VARCHAR(64)
+        CHECK (content_sha256 IS NULL OR content_sha256 ~ '^[0-9a-f]{64}$'),
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (document_id, version_number)
 );
@@ -95,3 +97,11 @@ CREATE INDEX idx_versions_document
 
 CREATE INDEX idx_versions_document_number
     ON document_versions(document_id, version_number DESC);
+
+CREATE INDEX idx_versions_content_sha256
+    ON document_versions(content_sha256)
+    WHERE content_sha256 IS NOT NULL;
+
+CREATE INDEX idx_versions_document_content_sha256
+    ON document_versions(document_id, content_sha256)
+    WHERE content_sha256 IS NOT NULL;

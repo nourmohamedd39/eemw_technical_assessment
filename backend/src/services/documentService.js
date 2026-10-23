@@ -2,6 +2,7 @@
 const fs = require("fs/promises");
 const path = require("path");
 const repository = require("../repositories/documentRepository");
+const { hashFile } = require("../utils/fileHasher");
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -32,6 +33,22 @@ const validateVersionFile = (file) => {
   if (file.size > MAX_FILE_SIZE) {
     throw httpError(413, "The uploaded file exceeds the maximum size of 25 MB.");
   }
+};
+
+const hashUploadedFile = async (file) => {
+  try {
+    return await hashFile(file.path);
+  } catch {
+    throw httpError(400, "The uploaded file could not be read.");
+  }
+};
+
+const duplicateDocumentError = (duplicate) => {
+  const error = httpError(409, "An identical file already exists in an accessible document.");
+  error.existingDocumentId = duplicate.id;
+  error.existingDocumentTitle = duplicate.title;
+  error.existingDocumentVersion = duplicate.version_number;
+  return error;
 };
 
 const withDatabaseClient = async (callback) => {
@@ -186,6 +203,7 @@ const uploadDocumentVersion = async (documentIdValue, file, demoUserId) => {
   const documentId = parsePositiveId(documentIdValue, "document ID");
   const userId = parseDemoUserId(demoUserId);
   validateVersionFile(file);
+  const contentSha256 = await hashUploadedFile(file);
 
   const client = await repository.pool.connect();
   let transactionStarted = false;
@@ -216,6 +234,17 @@ const uploadDocumentVersion = async (documentIdValue, file, demoUserId) => {
       throw httpError(404, "Document not found.");
     }
 
+    await repository.lockContentHash(client, contentSha256);
+    const duplicateVersion = await repository.findDocumentVersionByHash(
+      client,
+      documentId,
+      contentSha256
+    );
+
+    if (duplicateVersion) {
+      throw httpError(409, "This file is identical to an existing version of the document.");
+    }
+
     const versionNumber = await repository.findNextVersionNumber(
       client,
       documentId
@@ -228,6 +257,7 @@ const uploadDocumentVersion = async (documentIdValue, file, demoUserId) => {
       originalFilename: file.originalname,
       mimeType: file.mimetype,
       fileSize: file.size,
+      contentSha256,
     });
 
     await client.query("COMMIT");
@@ -345,6 +375,8 @@ const createDocument = async (data, file, demoUserId) => {
     throw httpError(413, "The uploaded file exceeds the maximum size of 25 MB.");
   }
 
+  const contentSha256 = await hashUploadedFile(file);
+
   // 6. Begin a database transaction
   const client = await repository.pool.connect();
 
@@ -358,6 +390,17 @@ const createDocument = async (data, file, demoUserId) => {
 
     if (!uploader) {
       throw httpError(404, "Uploader not found.");
+    }
+
+    await repository.lockContentHash(client, contentSha256);
+    const duplicate = await repository.findAccessibleDuplicateByHash(
+      client,
+      contentSha256,
+      selectedDemoUserId
+    );
+
+    if (duplicate) {
+      throw duplicateDocumentError(duplicate);
     }
 
     if (departmentIds.length > 0) {
@@ -388,6 +431,7 @@ const createDocument = async (data, file, demoUserId) => {
       originalFilename: file.originalname,
       mimeType: file.mimetype,
       fileSize: file.size,
+      contentSha256,
     });
 
     // 9. Save tags

@@ -43,6 +43,7 @@ Open [architecture.md](./architecture.md) and point out:
 - PostgreSQL metadata and relationship storage.
 - Separate local file storage.
 - Server-side permission checks.
+- Stage 1 SHA-256 duplicate detection and TXT comparison.
 
 State clearly that the demo-user selector is simulated identity for the POC,
 not production authentication.
@@ -79,7 +80,17 @@ metadata, version 1, tags, and permissions in a transaction.
 7. If an existing restricted document is opened by ID, show the graceful
    access error rather than metadata or a file.
 
-### 5. Demonstrate version history
+### 5. Demonstrate duplicate protection and TXT comparison
+
+1. Upload a small TXT file.
+2. Upload the same bytes again with a different filename and show the clear
+   duplicate response. An inaccessible restricted match is never disclosed.
+3. Add a different TXT version through the version endpoint.
+4. Open the detail page, choose two versions, and click **Compare versions**.
+5. Show unchanged, added, removed, or changed sections.
+6. Explain that DOCX, PDF, and XLSX comparison is intentionally deferred.
+
+### 6. Demonstrate version history
 
 The current UI displays history but does not expose a version-upload control.
 Use the API for this portion if required:

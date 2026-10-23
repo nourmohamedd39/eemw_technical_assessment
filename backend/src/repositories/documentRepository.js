@@ -37,13 +37,14 @@ const insertVersion = async (
     originalFilename,
     mimeType,
     fileSize,
+    contentSha256,
   }
 ) => {
   const result = await client.query(
     `INSERT INTO document_versions
        (document_id, version_number, file_path,
-        original_filename, mime_type, file_size)
-     VALUES ($1, $2, $3, $4, $5, $6)
+        original_filename, mime_type, file_size, content_sha256)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       documentId,
@@ -52,6 +53,7 @@ const insertVersion = async (
       originalFilename,
       mimeType,
       fileSize,
+      contentSha256,
     ]
   );
 
@@ -77,6 +79,48 @@ const findNextVersionNumber = async (client, documentId) => {
   );
 
   return Number(result.rows[0].next_version);
+};
+
+const lockContentHash = async (client, contentSha256) => {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [contentSha256]
+  );
+};
+
+const findAccessibleDuplicateByHash = async (client, contentSha256, userId) => {
+  const result = await client.query(
+    `SELECT d.id, d.title, v.version_number
+     FROM documents d
+     JOIN document_versions v ON v.document_id = d.id
+     WHERE v.content_sha256 = $1
+       AND (
+         NOT d.is_restricted OR EXISTS (
+           SELECT 1
+           FROM document_permissions viewer_permission
+           JOIN users viewer ON viewer.department_id = viewer_permission.department_id
+           WHERE viewer_permission.document_id = d.id
+             AND viewer.id = $2
+         )
+       )
+     ORDER BY d.id, v.version_number
+     LIMIT 1`,
+    [contentSha256, userId]
+  );
+
+  return result.rows[0] || null;
+};
+
+const findDocumentVersionByHash = async (client, documentId, contentSha256) => {
+  const result = await client.query(
+    `SELECT id, version_number
+     FROM document_versions
+     WHERE document_id = $1 AND content_sha256 = $2
+     LIMIT 1`,
+    [documentId, contentSha256]
+  );
+
+  return result.rows[0] || null;
 };
 
 // Create a tag if needed, or find its existing ID
@@ -296,6 +340,35 @@ const findDocumentVersions = async (client, documentId) => {
   return result.rows;
 };
 
+const findAccessibleVersionsForComparison = async (
+  client,
+  documentId,
+  userId,
+  versionNumbers
+) => {
+  const result = await client.query(
+    `SELECT v.id, v.version_number, v.file_path, v.original_filename,
+            v.mime_type, v.file_size, v.uploaded_at
+     FROM document_versions v
+     JOIN documents d ON d.id = v.document_id
+     WHERE v.document_id = $1
+       AND v.version_number = ANY($2::int[])
+       AND (
+         NOT d.is_restricted OR EXISTS (
+           SELECT 1
+           FROM document_permissions viewer_permission
+           JOIN users viewer ON viewer.department_id = viewer_permission.department_id
+           WHERE viewer_permission.document_id = d.id
+             AND viewer.id = $3
+         )
+       )
+     ORDER BY v.version_number` ,
+    [documentId, versionNumbers, userId]
+  );
+
+  return result.rows;
+};
+
 const findDocumentPermissions = async (client, documentId) => {
   const result = await client.query(
     `SELECT d.id, d.name
@@ -316,6 +389,9 @@ module.exports = {
   insertVersion,
   lockDocument,
   findNextVersionNumber,
+  lockContentHash,
+  findAccessibleDuplicateByHash,
+  findDocumentVersionByHash,
   findOrCreateTag,
   insertDocumentTag,
   findDepartmentsByIds,
@@ -324,5 +400,6 @@ module.exports = {
   findAccessibleDocumentById,
   findDocumentTags,
   findDocumentVersions,
+  findAccessibleVersionsForComparison,
   findDocumentPermissions,
 };

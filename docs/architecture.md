@@ -32,13 +32,25 @@ flowchart LR
 
     Repository -->|SQL over pg| DB[("PostgreSQL 17\nmetadata · tags · permissions\nusers · versions")]
     Services -->|generated UUID file names\nconfigured storage root| FS[("Local filesystem\nbackend/uploads")]
+    Services --> Hash["Duplicate hashing\nNode.js crypto + fs streams\nSHA-256"]
+    Hash -->|streamed file reads| FS
+    Services --> Compare["TXT version comparison\nNode.js fs + bounded line diff"]
+    Compare -->|authorized version reads| FS
     Docker["Docker Compose\nPostgreSQL + named volume"] --> DB
 
     style Browser fill:#e8f5f2,stroke:#0d746b
     style API fill:#f5f7f8,stroke:#6d7d86
     style DB fill:#fff2df,stroke:#e99552
     style FS fill:#fff2df,stroke:#e99552
+    style Hash fill:#e8f5f2,stroke:#0d746b
+    style Compare fill:#e8f5f2,stroke:#0d746b
 ```
+
+The Stage 1 Smart Document Guard components are deliberately kept inside the
+existing service boundary. Hashing uses Node.js `crypto` with streamed
+filesystem reads, while TXT comparison uses Node.js filesystem reads and a
+bounded internal line-diff utility. No file-format parser or comparison logic
+is placed in routes, controllers, repositories, or the browser.
 
 ### Runtime boundaries
 
@@ -202,8 +214,39 @@ Intentionally deferred:
 - Object storage and multi-instance filesystem coordination.
 - File-content inspection, malware scanning, and orphan-file reconciliation.
 - Historical-version download endpoints.
-- Redis caching, microservices, and duplicate-file detection.
+- Redis caching, microservices, and DOCX/PDF/XLSX comparison.
 - Advanced frontend pagination controls.
 
 These are future production improvements, not prerequisites for the required
 proof of concept.
+
+## Smart Document Guard Stage 1
+
+Implemented as a bonus extension:
+
+- SHA-256 is calculated from uploaded bytes using the reusable streaming
+  utility in [backend/src/utils/fileHasher.js](../backend/src/utils/fileHasher.js).
+- Hashes are stored per immutable row in `document_versions`; there is no
+  global uniqueness constraint because identical bytes may legitimately exist
+  in separate documents or departments.
+- New-document duplicate checks query only documents accessible to the selected
+  demo user. An inaccessible restricted document is never disclosed.
+- Same-document duplicate versions are rejected after the existing parent-row
+  lock is acquired. New-document duplicate checks use a PostgreSQL transaction
+  advisory lock keyed by the hash to reduce concurrent races.
+- Rejected duplicate files are removed through the existing upload cleanup path.
+- Existing records can have a nullable hash. The idempotent
+  `npm run backfill:hashes` command streams existing files and fills missing
+  hashes without deleting or replacing records.
+- TXT versions can be compared through
+  `GET /api/documents/:id/compare?fromVersion=1&toVersion=2`. The service
+  authorizes the document before reading either version and returns bounded
+  added, removed, changed, and unchanged sections.
+- TXT comparison is limited to 5 MB files, 500,000 extracted characters, and
+  10,000 lines per version. Historical files are never modified.
+
+Deferred to a later stage:
+
+- DOCX paragraph extraction and comparison.
+- PDF text-layer extraction; scanned PDFs would require OCR.
+- XLSX sheet/cell-aware comparison.
