@@ -67,14 +67,31 @@ CREATE TABLE document_permissions (
 );
 
 -- Search-related indexes
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE INDEX idx_documents_title
     ON documents(title);
 
+CREATE INDEX idx_documents_title_trgm
+    ON documents USING GIN (title gin_trgm_ops);
+
 CREATE INDEX idx_documents_uploader
     ON documents(uploader_id);
+
+CREATE INDEX idx_users_name_trgm
+    ON users USING GIN (name gin_trgm_ops);
+
+CREATE INDEX idx_users_email_trgm
+    ON users USING GIN (email gin_trgm_ops);
+
+CREATE INDEX idx_tags_name_trgm
+    ON tags USING GIN (name gin_trgm_ops);
 
 CREATE INDEX idx_document_tags_tag
     ON document_tags(tag_id);
 
 CREATE INDEX idx_versions_document
     ON document_versions(document_id);
+
+CREATE INDEX idx_versions_document_number
+    ON document_versions(document_id, version_number DESC);
