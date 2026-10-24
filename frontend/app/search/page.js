@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppHeader from "../components/AppHeader";
 import DocumentCard from "../components/DocumentCard";
@@ -11,7 +10,6 @@ import { apiRequest } from "../../lib/api";
 const PAGE_SIZE = 20;
 
 export default function SearchPage() {
-  const router = useRouter();
   const { demoUserId } = useDemoUser();
   const [values, setValues] = useState({ title: "", tag: "", uploader: "" });
   const [documents, setDocuments] = useState([]);
@@ -52,14 +50,12 @@ export default function SearchPage() {
     if (values.title.trim()) params.set("q", values.title.trim());
     if (values.tag.trim()) params.set("tag", values.tag.trim());
     if (values.uploader.trim()) params.set("uploader", values.uploader.trim());
-    router.push("/search" + (params.toString() ? "?" + params.toString() : ""));
-    window.setTimeout(() => window.location.reload(), 0);
+    window.location.assign("/search" + (params.toString() ? "?" + params.toString() : ""));
   };
   const changePage = (nextOffset) => {
     const params = new URLSearchParams(window.location.search);
     if (nextOffset > 0) params.set("offset", String(nextOffset)); else params.delete("offset");
-    router.push("/search" + (params.toString() ? "?" + params.toString() : ""));
-    window.setTimeout(() => window.location.reload(), 0);
+    window.location.assign("/search" + (params.toString() ? "?" + params.toString() : ""));
   };
 
   const hasPrevious = pagination.offset > 0;
@@ -72,7 +68,7 @@ export default function SearchPage() {
         <div className="page-heading"><div><p className="eyebrow">Find a file</p><h1>Search documents</h1><p className="page-intro">Search the documents your selected demo user is authorized to access.</p></div></div>
         <section className="panel search-page-panel" aria-labelledby="search-heading"><h2 id="search-heading">Search repository</h2><SearchControls values={values} onChange={updateValue} onSubmit={submitSearch} /></section>
         <section className="results-section" aria-live="polite">
-          <div className="section-heading"><div><p className="eyebrow">Authorized results</p><h2>{pagination.total} document{pagination.total === 1 ? "" : "s"}</h2></div>{(values.title || values.tag || values.uploader) && <button className="text-button" type="button" onClick={() => { router.push("/search"); window.setTimeout(() => window.location.reload(), 0); }}>Clear filters</button>}</div>
+          <div className="section-heading"><div><p className="eyebrow">Authorized results</p><h2>{pagination.total} document{pagination.total === 1 ? "" : "s"}</h2></div>{(values.title || values.tag || values.uploader) && <button className="text-button" type="button" onClick={() => window.location.assign("/search")}>Clear filters</button>}</div>
           {loading && <p className="loading-state" role="status">Searching documents...</p>}
           {error && !loading && <p className="alert error" role="alert">{error}</p>}
           {!loading && !error && documents.length === 0 && <p className="empty-state">No documents match these filters.</p>}

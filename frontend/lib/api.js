@@ -49,3 +49,7 @@ export async function compareDocumentVersions(documentId, fromVersion, toVersion
   const response = await apiRequest(`/documents/${documentId}/compare?${query}`, { demoUserId });
   return response.json();
 }
+
+export async function downloadDocumentVersion(documentId, versionNumber, demoUserId) {
+  return apiRequest(`/documents/${documentId}/versions/${versionNumber}/download`, { demoUserId });
+}

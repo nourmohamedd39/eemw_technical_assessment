@@ -13,10 +13,10 @@ export default function UploadPage() {
       <AppHeader />
       <div className="page-content upload-page-content">
         <div className="page-heading">
-          <div><p className="eyebrow">Add to repository</p><h1>Upload a document</h1><p className="page-intro">Add a document with useful context and clear department access rules.</p></div>
+          <h1>Upload a document</h1>
           <Link className="secondary-button inline-button page-action" href="/documents">Browse documents</Link>
         </div>
-        <UploadForm demoUserId={demoUserId} />
+        <div className="centered-content"><UploadForm demoUserId={demoUserId} /></div>
       </div>
       <footer className="footer-note">Unpile &middot; Supported files: PDF, DOCX, TXT, and XLSX up to 25 MB.</footer>
     </main>

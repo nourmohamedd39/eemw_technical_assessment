@@ -110,7 +110,6 @@ export default function UploadForm({ demoUserId, onUploaded }) {
 
   return (
     <div className="panel upload-panel">
-      <div className="panel-heading"><div><p className="eyebrow">Add to repository</p><h2>Upload a document</h2></div><span className="panel-icon">&#8597;</span></div>
       <form onSubmit={uploadDocument}>
         <label className="field-label" htmlFor="document-title">Title</label>
         <input id="document-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. 2026 remote work policy" />

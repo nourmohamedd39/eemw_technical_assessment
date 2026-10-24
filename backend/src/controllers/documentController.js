@@ -135,6 +135,30 @@ const downloadDocument = async (req, res) => {
   }
 };
 
+const downloadDocumentVersion = async (req, res) => {
+  try {
+    const download = await documentService.getDocumentVersionDownload(
+      req.params.id,
+      req.params.versionNumber,
+      getDemoUserId(req)
+    );
+
+    return res.download(
+      download.filePath,
+      download.originalFilename,
+      (error) => {
+        if (error && !res.headersSent) {
+          return handleReadError(res, error);
+        }
+
+        return undefined;
+      }
+    );
+  } catch (error) {
+    return handleReadError(res, error);
+  }
+};
+
 const removeUploadedFile = async (file) => {
   if (!file) {
     return;
@@ -210,6 +234,7 @@ module.exports = {
   searchDocuments,
   getDocument,
   downloadDocument,
+  downloadDocumentVersion,
   uploadDocumentVersion,
   getVersionHistory,
   compareDocumentVersions,
