@@ -144,14 +144,21 @@ const getDocumentDownload = async (documentIdValue, demoUserId) => {
     throw httpError(404, "Document file not found.");
   }
 
+  return {
+    filePath: await resolveStoredFilePath(document.latest_file_path),
+    originalFilename: document.latest_filename,
+    mimeType: document.latest_mime_type,
+  };
+};
+
+const resolveStoredFilePath = async (storedPath) => {
   const uploadDirectory = process.env.UPLOAD_DIRECTORY
     ? path.resolve(process.env.UPLOAD_DIRECTORY)
     : path.resolve(__dirname, "../..", "uploads");
-  const storedFilename = path.basename(document.latest_file_path);
-  const filePath = path.resolve(uploadDirectory, storedFilename);
+  const filePath = path.resolve(uploadDirectory, path.basename(storedPath || ""));
   const relativePath = path.relative(uploadDirectory, filePath);
 
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+  if (!storedPath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
     throw httpError(500, "Stored document path is invalid.");
   }
 
@@ -161,11 +168,37 @@ const getDocumentDownload = async (documentIdValue, demoUserId) => {
     throw httpError(404, "Document file not found.");
   }
 
-  return {
-    filePath,
-    originalFilename: document.latest_filename,
-    mimeType: document.latest_mime_type,
-  };
+  return filePath;
+};
+
+const getDocumentVersionDownload = async (documentIdValue, versionNumberValue, demoUserId) => {
+  const documentId = parsePositiveId(documentIdValue, "document ID");
+  const versionNumber = parsePositiveId(versionNumberValue, "version number");
+  const userId = parseDemoUserId(demoUserId);
+
+  return withDatabaseClient(async (client) => {
+    const viewer = await repository.findUserById(client, userId);
+    if (!viewer) {
+      throw httpError(404, "Demo user not found.");
+    }
+
+    const version = await repository.findAccessibleDocumentVersion(
+      client,
+      documentId,
+      versionNumber,
+      userId
+    );
+
+    if (!version) {
+      throw httpError(404, "Document version not found.");
+    }
+
+    return {
+      filePath: await resolveStoredFilePath(version.file_path),
+      originalFilename: version.original_filename,
+      mimeType: version.mime_type,
+    };
+  });
 };
 
 const getVersionHistory = async (documentIdValue, demoUserId) => {
@@ -488,6 +521,7 @@ module.exports = {
   searchDocuments,
   getDocument,
   getDocumentDownload,
+  getDocumentVersionDownload,
   getVersionHistory,
   uploadDocumentVersion,
 };

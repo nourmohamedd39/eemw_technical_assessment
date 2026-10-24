@@ -194,7 +194,17 @@ const findAccessibleDocuments = async (
   };
 
   if (title) {
-    addFilter("d.title ILIKE '%' || $VALUE || '%'", title);
+    addFilter(
+      `(
+         ($VALUE ~ '[[:space:]]' AND d.title ILIKE '%' || $VALUE || '%')
+         OR EXISTS (
+           SELECT 1
+           FROM regexp_split_to_table(d.title, '[^[:alnum:]]+') AS title_word
+           WHERE title_word ILIKE $VALUE || '%'
+         )
+       )`,
+      title
+    );
   }
 
   if (tag) {
@@ -340,6 +350,29 @@ const findDocumentVersions = async (client, documentId) => {
   return result.rows;
 };
 
+// Return a requested version only when the viewer can access its parent document.
+const findAccessibleDocumentVersion = async (client, documentId, versionNumber, userId) => {
+  const result = await client.query(
+    `SELECT v.id, v.version_number, v.file_path, v.original_filename, v.mime_type
+     FROM document_versions v
+     JOIN documents d ON d.id = v.document_id
+     WHERE v.document_id = $1
+       AND v.version_number = $2
+       AND (
+         NOT d.is_restricted OR EXISTS (
+           SELECT 1
+           FROM document_permissions viewer_permission
+           JOIN users viewer ON viewer.department_id = viewer_permission.department_id
+           WHERE viewer_permission.document_id = d.id
+             AND viewer.id = $3
+         )
+       )`,
+    [documentId, versionNumber, userId]
+  );
+
+  return result.rows[0] || null;
+};
+
 const findAccessibleVersionsForComparison = async (
   client,
   documentId,
@@ -400,6 +433,7 @@ module.exports = {
   findAccessibleDocumentById,
   findDocumentTags,
   findDocumentVersions,
+  findAccessibleDocumentVersion,
   findAccessibleVersionsForComparison,
   findDocumentPermissions,
 };

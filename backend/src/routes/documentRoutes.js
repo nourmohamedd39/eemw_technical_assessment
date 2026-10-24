@@ -7,6 +7,7 @@ const {
   searchDocuments,
   getDocument,
   downloadDocument,
+  downloadDocumentVersion,
   uploadDocumentVersion,
   getVersionHistory,
   compareDocumentVersions,
@@ -55,6 +56,7 @@ router.post("/", handleUpload, createDocument);
 router.get("/", searchDocuments);
 router.post("/:id/versions", handleUpload, uploadDocumentVersion);
 router.get("/:id/versions", getVersionHistory);
+router.get("/:id/versions/:versionNumber/download", downloadDocumentVersion);
 router.get("/:id/compare", compareDocumentVersions);
 router.get("/:id/download", downloadDocument);
 router.get("/:id", getDocument);

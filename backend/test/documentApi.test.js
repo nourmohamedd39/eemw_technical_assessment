@@ -278,6 +278,12 @@ test("document API integration suite", async (t) => {
     });
 
     await t.test("searches by title, tag, and uploader with bounded pagination", async () => {
+      const internalCharacterMatch = await request("/documents?title=d", { demoUserId: 1 });
+      assert.equal((await json(internalCharacterMatch)).documents.length, 0);
+
+      const wordPrefixMatch = await request("/documents?title=policy", { demoUserId: 1 });
+      assert.equal((await json(wordPrefixMatch)).documents.length, 1);
+
       for (const query of ["title=Integration", "tag=finance", "uploader=ahmed@example.com"]) {
         const response = await request(`/documents?${query}&limit=10&offset=0`, { demoUserId: 1 });
         assert.equal(response.status, 200);
@@ -350,6 +356,32 @@ test("document API integration suite", async (t) => {
       assert.equal(latestDownload.status, 200);
       assert.ok(["version two", "version three"].includes(await latestDownload.text()));
 
+      const historicalDownload = await request(`/documents/${documentId}/versions/1/download`, { demoUserId: 1 });
+      assert.equal(historicalDownload.status, 200);
+      assert.equal(await historicalDownload.text(), "policy content");
+      assert.match(historicalDownload.headers.get("content-disposition") || "", /filename="?document\.txt"?/i);
+
+      const missingVersion = await request(`/documents/${documentId}/versions/99/download`, { demoUserId: 1 });
+      assert.equal(missingVersion.status, 404);
+
+      const invalidVersion = await request(`/documents/${documentId}/versions/not-a-version/download`, { demoUserId: 1 });
+      assert.equal(invalidVersion.status, 400);
+
+      const versionPath = await repository.pool.query(
+        "SELECT file_path FROM document_versions WHERE document_id = $1 AND version_number = 1",
+        [documentId]
+      );
+      await repository.pool.query(
+        "UPDATE document_versions SET file_path = $1 WHERE document_id = $2 AND version_number = 1",
+        ["missing-file.txt", documentId]
+      );
+      const missingFile = await request(`/documents/${documentId}/versions/1/download`, { demoUserId: 1 });
+      assert.equal(missingFile.status, 404);
+      await repository.pool.query(
+        "UPDATE document_versions SET file_path = $1 WHERE document_id = $2 AND version_number = 1",
+        [versionPath.rows[0].file_path, documentId]
+      );
+
       const before = await uploadCount();
       const duplicateVersion = await request(`/documents/${documentId}/versions`, {
         method: "POST",
@@ -416,6 +448,9 @@ test("document API integration suite", async (t) => {
 
       const unauthorized = await request(`/documents/${restrictedDocumentId}/compare?fromVersion=1&toVersion=2`, { demoUserId: 2 });
       assert.equal(unauthorized.status, 404);
+
+      const unauthorizedHistoricalDownload = await request(`/documents/${restrictedDocumentId}/versions/1/download`, { demoUserId: 2 });
+      assert.equal(unauthorizedHistoricalDownload.status, 404);
 
       const missing = await request("/documents/99999/compare?fromVersion=1&toVersion=2", { demoUserId: 1 });
       assert.equal(missing.status, 404);
