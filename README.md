@@ -100,7 +100,7 @@ npm run build
 
 Unpile uses a client-server architecture with a layered monolithic backend. PostgreSQL manages metadata and relationships, while the filesystem stores document contents.
 
-Check System Architecture Diagram.png
+Check docs/System Architecture Diagram.png
 
 ## Future Improvements
 

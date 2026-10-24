@@ -111,7 +111,6 @@ export default function DocumentDetailPage() {
                   <div><dt>Uploaded by</dt><dd>{data.document.uploaderName || "Not available"}</dd></div>
                   <div><dt>Uploader department</dt><dd>{data.document.uploaderDepartment || "Not available"}</dd></div>
                   <div><dt>Uploader role</dt><dd>{formatRole(data.document.uploaderRole)}</dd></div>
-                  <div><dt>Original filename</dt><dd>{data.document.latestFilename}</dd></div>
                   <div><dt>File size</dt><dd>{formatBytes(data.document.latestFileSize)}</dd></div>
                   <div><dt>Document access</dt><dd>{data.document.isRestricted ? ((data.permissions || []).map((department) => department.name).join(", ") || "No departments assigned") : "All departments"}</dd></div>
                 </dl>
