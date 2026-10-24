@@ -102,6 +102,10 @@ Unpile uses a client-server architecture with a layered monolithic backend. Post
 
 Check docs/System Architecture Diagram.png
 
+## Demo Video
+
+https://drive.google.com/drive/folders/1ihtOUla5eohOEeqHXA8Jwzw5snPcouHH?usp=sharing
+
 ## Future Improvements
 
 With more time, I would implement production authentication and role-based authorization, scalable file storage, malware scanning, OCR, and more advanced search capabilities.
