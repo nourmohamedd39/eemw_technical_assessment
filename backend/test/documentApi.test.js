@@ -203,6 +203,14 @@ test("document API integration suite", async (t) => {
       assert.deepEqual(payload.document.tags, ["finance", "policy"]);
       assert.equal(await uploadCount(), 1);
 
+      const detailResponse = await request(`/documents/${documentId}`, { demoUserId: 1 });
+      assert.equal(detailResponse.status, 200);
+      const detailPayload = await json(detailResponse);
+      assert.equal(detailPayload.document.uploaderName, "Ahmed Ali");
+      assert.equal(detailPayload.document.uploaderDepartment, "HR");
+      assert.equal(detailPayload.document.uploaderRole, "employee");
+      assert.deepEqual(detailPayload.permissions, []);
+
       const storedHash = await repository.pool.query(
         "SELECT content_sha256 FROM document_versions WHERE document_id = $1",
         [documentId]

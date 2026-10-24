@@ -290,6 +290,8 @@ const findAccessibleDocumentById = async (client, documentId, userId) => {
        d.uploader_id,
        u.name AS uploader_name,
        u.email AS uploader_email,
+       uploader_department.name AS uploader_department,
+       u.role AS uploader_role,
        d.is_restricted,
        d.created_at,
        latest.version_number AS latest_version,
@@ -300,6 +302,7 @@ const findAccessibleDocumentById = async (client, documentId, userId) => {
        latest.uploaded_at AS latest_uploaded_at
      FROM documents d
      JOIN users u ON u.id = d.uploader_id
+     JOIN departments uploader_department ON uploader_department.id = u.department_id
      LEFT JOIN LATERAL (
        SELECT version_number, file_path, original_filename, mime_type,
               file_size, uploaded_at

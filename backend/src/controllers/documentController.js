@@ -96,6 +96,8 @@ const getDocument = async (req, res) => {
         uploaderId: result.document.uploader_id,
         uploaderName: result.document.uploader_name,
         uploaderEmail: result.document.uploader_email,
+        uploaderDepartment: result.document.uploader_department,
+        uploaderRole: result.document.uploader_role,
         isRestricted: result.document.is_restricted,
         createdAt: result.document.created_at,
         latestVersion: result.document.latest_version,

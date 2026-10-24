@@ -10,6 +10,10 @@ import { useDemoUser } from "../../components/DemoUserContext";
 import useRecentlyViewed from "../../hooks/useRecentlyViewed";
 import { apiRequest, downloadDocumentVersion, formatBytes } from "../../../lib/api";
 
+const formatRole = (role) => role
+  ? role.charAt(0).toUpperCase() + role.slice(1)
+  : "Not available";
+
 export default function DocumentDetailPage() {
   const params = useParams();
   const documentId = params.id;
@@ -94,7 +98,6 @@ export default function DocumentDetailPage() {
               <div className="detail-hero-copy">
                 <h1>{data.document.title}</h1>
                 {data.document.description && <p>{data.document.description}</p>}
-                <p className="detail-uploader">Uploaded by {data.document.uploaderName}</p>
               </div>
               <button className="primary-button download-button" type="button" onClick={downloadDocument} disabled={downloading}>
                 {downloading ? "Preparing download..." : "Download latest"}
@@ -105,12 +108,14 @@ export default function DocumentDetailPage() {
               <div className="panel information-panel">
                 <div className="panel-heading"><h2>Details</h2></div>
                 <dl className="metadata-list">
+                  <div><dt>Uploaded by</dt><dd>{data.document.uploaderName || "Not available"}</dd></div>
+                  <div><dt>Uploader department</dt><dd>{data.document.uploaderDepartment || "Not available"}</dd></div>
+                  <div><dt>Uploader role</dt><dd>{formatRole(data.document.uploaderRole)}</dd></div>
                   <div><dt>Original filename</dt><dd>{data.document.latestFilename}</dd></div>
                   <div><dt>File size</dt><dd>{formatBytes(data.document.latestFileSize)}</dd></div>
-                  <div><dt>Access</dt><dd><span className={data.document.isRestricted ? "status-pill restricted" : "status-pill"}>{data.document.isRestricted ? "Restricted" : "All departments"}</span></dd></div>
+                  <div><dt>Document access</dt><dd>{data.document.isRestricted ? ((data.permissions || []).map((department) => department.name).join(", ") || "No departments assigned") : "All departments"}</dd></div>
                 </dl>
                 <div className="detail-section"><h3>Tags</h3><div className="tag-row">{(data.tags || []).length ? data.tags.map((tag) => <em key={tag.id}>{tag.name}</em>) : <span className="muted">No tags</span>}</div></div>
-                {data.document.isRestricted && <div className="detail-section"><h3>Allowed departments</h3><div className="tag-row">{(data.permissions || []).length ? data.permissions.map((department) => <em key={department.id}>{department.name}</em>) : <span className="muted">No departments assigned</span>}</div></div>}
               </div>
 
               <div className="panel versions-panel">

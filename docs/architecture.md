@@ -13,15 +13,14 @@ Unpile follows a client-server architecture with a layered monolithic backend.
 
 ## System architecture diagram
 
-[System architecture diagram to be added here]
+uploaded on the repo
 
-The external diagram should show the browser, Next.js frontend, shared API
-client, Express backend layers, PostgreSQL, local file storage, and the main
-authorization and comparison flows.
 
 ## Design rationale
 
 ### Frontend and API boundary
+
+The frontend uses plain CSS through frontend/app/globals.css to maintain consistent styling across pages and components.
 
 Next.js App Router and React provide the browser UI for upload, search, browse,
 details, version history, downloads, and comparison. Shared frontend API
